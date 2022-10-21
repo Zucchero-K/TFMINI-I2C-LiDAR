@@ -4,7 +4,7 @@
   - two sg90 servos
   - TMini I2C module (https://www.sparkfun.com/products/14786)
   - SD-card module
-  - 3D-printed robot arm to move the sensor over jaw and pitch
+  - 3D-printed robotic stand, to move the sensor over jaw and pitch
 */
 
 #include <Servo.h>
@@ -39,17 +39,27 @@ int Z;
 bool valid_data = false;
 bool triggerDone = false;
 
-float pi = 3.14159;
-float conv = pi / 180.0;
+const float pi = 3.14159;
+const float conv = pi / 180.0;
 
 int stepAngle = 3; // Degrees per step
 int stabilize_delay = 150; // Delay between each pitch adjustment
+
+//int stepAngle = 90; // Degrees per step
+//int stabilize_delay = 0;
+
+const String fileName = "data_file";
+const String fileExtension = ".txt";
+String stringBuffer = "";
+const int namesize = 20;
+char charBuffer[namesize];
 
 void setup() {
 
   servo_jaw.attach(jaw_pin);
   servo_pitch.attach(pitch_pin);
   pinMode(startButton, INPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
 
   servo_jaw.write(0);
   servo_pitch.write(0);
@@ -61,7 +71,7 @@ void setup() {
   Serial.print("Initializing SD card...");
   if (!SD.begin(SD_CS_PIN)) {
     Serial.println("initialization failed!");
-    return;
+    error();
   }
   Serial.println("initialization done.");
 }
@@ -78,11 +88,8 @@ void loop() {
 }
 
 void scan() {
-  // Remove previously generated file if it exists
-  if (SD.exists("scan_data.txt")) {
-    SD.remove("scan_data.txt");
-  }
-  DataFile = SD.open("scan_data.txt", FILE_WRITE);
+
+  createNewFile();
   if (DataFile) {
     bool pitch_direction = true;
     for (int jaw = 0; jaw < 181; jaw += stepAngle) {
@@ -91,6 +98,7 @@ void scan() {
           moveServos(jaw, pitch);
           getPoint(jaw, pitch);
         }
+        //goto endTest;
         pitch_direction = false;
       }
       else {
@@ -101,6 +109,7 @@ void scan() {
         pitch_direction = true;
       }
     }
+    //endTest:
     DataFile.close();
   } else {
     return;
@@ -145,7 +154,7 @@ bool getDistance(uint8_t devAddr) {
     for (uint8_t x = 0 ; x < 7 ; x++) {
       uint8_t incoming = Wire.read();
       /*
-      if (x == 0) {
+        if (x == 0) {
         //Trigger done
         if (incoming == 0x01) {
           triggerDone = true;
@@ -153,7 +162,7 @@ bool getDistance(uint8_t devAddr) {
         else if(incoming == 0x00){
           Serial.println(F("Previous frame"));
         }
-      }
+        }
       */
       if (x == 2)
         dist = incoming; //LSB of the distance value "Dist_L"
@@ -173,10 +182,10 @@ bool getDistance(uint8_t devAddr) {
     return false;
   }
   /*
-  if(!triggerDone){
+    if(!triggerDone){
     delay(30); // Short delay before sending new request
     goto jmp_start;
-  }*/
+    }*/
   if (valid_data) {
     return true;
   }
@@ -198,4 +207,52 @@ void sphericalToCartesian(int r, int jaw, int pitch, int& x, int& y, int& z) {
 int angleFix(int angle) {
   angle = map(angle, 0, 180, 0, 170);
   return angle;
+}
+
+void clearFilename(char* filename, uint8_t namesize) {
+  for (int i = 0; i < namesize; i++) {
+    filename[i] = 0x00;
+  }
+  // memset(filename,0x00,namesize); // maybe faster
+}
+
+void createNewFile() {
+
+  DataFile.close();
+  clearFilename(charBuffer, namesize);
+  stringBuffer = fileName + fileExtension;
+  stringBuffer.toCharArray(charBuffer, namesize);
+  if (!SD.exists(charBuffer)) {
+    DataFile = SD.open(charBuffer, FILE_WRITE);
+  }
+  else {
+    int maxNum = 255;
+    int num = 2;
+    stringBuffer = fileName + " (" + String(num) + ")" + fileExtension;
+    stringBuffer.toCharArray(charBuffer, namesize);
+    while (SD.exists(charBuffer)) {
+      if (num == maxNum) error();
+      num++;
+      clearFilename(charBuffer, namesize);
+      stringBuffer = fileName + " (" + String(num) + ")" + fileExtension;
+      stringBuffer.toCharArray(charBuffer, namesize);
+    }
+    DataFile = SD.open(charBuffer, FILE_WRITE);
+  }
+  if (!DataFile) {
+    error();
+  }
+}
+
+void error() { // Blinking led means an error occurred.
+  DataFile.close();
+  Serial.println("Error initializing the SD card or creating a file.");
+  while (1) {
+    
+      digitalWrite(LED_BUILTIN, HIGH);
+      delay(100);
+      digitalWrite(LED_BUILTIN, LOW);
+      delay(100);
+    
+  }
 }
